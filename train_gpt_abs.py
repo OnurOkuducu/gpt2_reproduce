@@ -232,8 +232,23 @@ class ValueEmbedding(nn.Module):
         return ve
 
 # -----------------------------------------------------------------------------
-# The main GPT-2 model
+class AbstainHead(nn.Module):
+    def __init__(self, model_dim: int):
+        super().__init__()
+        # 3-layer MLP: [D] -> [D] -> [D] -> [1]
+        self.net = nn.Sequential(
+            nn.Linear(model_dim, model_dim),
+            nn.ReLU(),
+            nn.Linear(model_dim, model_dim//2),
+            nn.ReLU(),
+            nn.Linear(model_dim//2, 1),
+        )
+        
+        self.net = self.net.float()
 
+    def forward(self, x: Tensor) -> Tensor:
+        return self.net(x)
+        
 class GPT(nn.Module):
 
     def __init__(self, vocab_size, num_layers, num_heads, model_dim):
@@ -253,7 +268,13 @@ class GPT(nn.Module):
         # Add learnable skip connection weights for decoder layers
         self.skip_weights = nn.Parameter(torch.ones(self.num_decoder_layers))
 
-    def forward(self, inputs, targets, sliding_window_num_blocks):
+        self.abstain_head = AbstainHead(model_dim) 
+        
+        self.register_buffer("lambda_penalty_buf", torch.tensor(1.5, dtype=torch.float32))
+        self.register_buffer("beta_reg_buf",       torch.tensor(1.5, dtype=torch.float32))
+        self.register_buffer("gamma_entropy_buf",  torch.tensor(0.05, dtype=torch.float32))
+
+    def forward(self, inputs, targets, sliding_window_num_blocks, use_raw_logits = True):
         BLOCK_SIZE = 128
         seq_len = len(inputs)
         assert seq_len % BLOCK_SIZE == 0
@@ -310,6 +331,8 @@ class GPT(nn.Module):
         for i in range(self.num_encoder_layers):
             x = self.blocks[i](x, ve_enc[i], x0, block_mask)
             skip_connections.append(x)
+            
+        middle_layer = x
         # Decoder pass - process the remaining blocks with weighted skip connections
         for i in range(self.num_decoder_layers):
             x = x + self.skip_weights[i] * skip_connections.pop()
@@ -317,11 +340,38 @@ class GPT(nn.Module):
             x = self.blocks[self.num_encoder_layers + i](x, ve_dec[i], x0, block_mask)
 
         x = norm(x)
-        logits = self.lm_head(x)
-        logits = 15 * torch.tanh(logits / 15) # @Grad62304977 added tanh softcapping, @KoszarskyB reduced it from 30 to 15
+        middle_layer = norm(middle_layer)
+        
+        H = middle_layer[0].float()                 
+        gate_logits_all = self.abstain_head(H).squeeze(-1)  
+        g_all = torch.sigmoid(gate_logits_all)              
+        
+        raw_logits = self.lm_head(x)
+        
+        logits = raw_logits if use_raw_logits else 15 * torch.tanh(raw_logits / 15) 
         logits = logits.float()
-        loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets)
+        
+        V = logits.size(-1)
+        ce_all = F.cross_entropy(
+            logits.view(-1, V),
+            targets.view(-1),
+            reduction="none",
+        ).view(-1)
+
+        lambda_pen = self.lambda_penalty_buf
+        beta = self.beta_reg_buf
+        K = 0.5 
+        
+        loss_per_token = (
+            g_all * ce_all
+            + (1.0 - g_all) * lambda_pen
+            + beta * (g_all - K) ** 2
+        )
+        
+        loss = loss_per_token.mean()
+        
         return loss
+
 
 # -----------------------------------------------------------------------------
 # Our own simple Distributed Data Loader
@@ -448,15 +498,33 @@ model = torch.compile(model)
 ddp_model = DDP(model, device_ids=[local_rank], broadcast_buffers=False, gradient_as_bucket_view=True)
 
 # collect the parameters to optimize
+abstain_params = list(model.abstain_head.parameters())
+print("abstain_params len:", len(abstain_params))
+for n, p in model.abstain_head.named_parameters():
+    print("Abstain Head Named Params   ", n, p.shape)
+
+abstain_ids = {id(p) for p in abstain_params}
+
 hidden_matrix_params = [p for p in model.blocks.parameters() if p.ndim == 2]
 embed_params = [model.embed.weight, *model.value_embeds.parameters()]
 scalar_params = [p for p in model.parameters() if p.ndim < 2]
 head_params = [model.lm_head.weight]
 
+abstain_params = list(model.abstain_head.parameters())
+
+def filter_params(base, *others):
+    other_ids = {id(p) for group in others for p in group}
+    return [p for p in base if id(p) not in other_ids]
+
+abstain_params = filter_params(abstain_params, head_params, embed_params, scalar_params)
+print('Abstain param length : ',len(abstain_params))
+print(abstain_params[0].shape)
+
 # init the optimizer(s)
 optimizer1 = torch.optim.Adam([dict(params=embed_params, lr=0.6),
                                dict(params=head_params, lr=0.008),
-                               dict(params=scalar_params, lr=0.04)],
+                               dict(params=scalar_params, lr=0.04),
+                              dict(params=abstain_params, lr=0.0001)],
                               betas=(0.8, 0.95), fused=True)
 optimizer2 = Muon(hidden_matrix_params, lr=0.05, momentum=0.95)
 optimizers = [optimizer1, optimizer2]
@@ -489,6 +557,19 @@ t0 = time.perf_counter()
 train_steps = args.num_iterations
 for step in range(train_steps + 1):
     last_step = (step == train_steps)
+
+    lambda_start = 5
+    lambda_end = 6
+    beta_start = 2
+    beta_end = 3
+
+    lambda_penalty_annealed = lambda_start + (lambda_end - lambda_start) * (step / args.num_iterations)
+    beta_reg_annealed = beta_start + (beta_end - beta_start) * (step / args.num_iterations)
+    
+    with torch.no_grad():
+        model.lambda_penalty_buf.fill_(lambda_penalty_annealed)
+        model.beta_reg_buf.fill_(beta_reg_annealed)
+        
     # This effectively ignores timing first 10 steps, which are slower for weird reasons.
     # Alternately, and slightly more correctly in terms of benchmarking, we could do 10
     # steps with dummy data first, and then re-initialize the model and reset the loader.
