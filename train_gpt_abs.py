@@ -11,7 +11,7 @@ from dataclasses import dataclass
 
 import torch
 torch.empty(1, device='cuda', requires_grad=True).backward()
-from torch import nn
+from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
