@@ -5,6 +5,7 @@ import torch
 import tiktoken
 from tqdm import tqdm
 from train_gpt_with_inference import GPT
+import pandas as pd
 
 device = "cuda"
 vocab_size = 50304
@@ -94,7 +95,7 @@ def score_continuation_like_hellaswag(model, enc, prompt: str, continuation: str
     mean_gate = g_slice.mean().item() if g_slice.numel() else 1.0
     min_gate  = g_slice.min().item()  if g_slice.numel() else 1.0
 
-    return {
+    return sum_lp,avg_lp, {
         "sum_lp": sum_lp,
         "avg_lp": avg_lp,
         "sum_lp_gated": sum_lp_gated,
@@ -107,7 +108,8 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmark_json", type=str, default="reddit_subreddit_benchmark.json")
-    parser.add_argument("--ckpt", type=str, required=True)
+    checkpoint_def = ''
+    parser.add_argument("--ckpt", type=str,default = checkpoint_def)
     parser.add_argument("--with_ins_ctx", action="store_true")
     parser.add_argument("--n", type=int, default=None)  # optional subset
     args = parser.parse_args()
@@ -132,6 +134,7 @@ def main():
     correct_sum = 0
     correct_avg = 0
 
+    rows = []
     for i, ex in enumerate(tqdm(data)):
         instr = ex["instruction"]
         post  = ex["post"]
@@ -142,11 +145,26 @@ def main():
         scores_sum = []
         scores_avg = []
         for sub in REDDIT_SUBS:
-            s_sum, s_avg = score_continuation_like_hellaswag(
+            s_sum, s_avg , s = score_continuation_like_hellaswag(
                 model, enc, prompt, f"r/{sub}", sliding_window_num_blocks
             )
             scores_sum.append(s_sum)
             scores_avg.append(s_avg)
+            rows.append({
+                "example_id": i,
+                "ctx": ctx,
+                "option_idx": j,
+                "option_text": cand,
+                "is_gt": int(j == gold),
+                "sum_lp": s["sum_lp"],
+                "avg_lp": s["avg_lp"],
+                "sum_lp_gated": s["sum_lp_gated"],
+                "avg_lp_gated": s["avg_lp_gated"],
+                "mean_g": s["mean_g"],
+                "min_g": s["min_g"],
+            })
+
+
 
         pred_sum = REDDIT_SUBS[int(max(range(len(REDDIT_SUBS)), key=lambda j: scores_sum[j]))]
         pred_avg = REDDIT_SUBS[int(max(range(len(REDDIT_SUBS)), key=lambda j: scores_avg[j]))]
@@ -157,6 +175,11 @@ def main():
         if (i + 1) % 50 == 0:
             print(f"{i+1}/{len(data)} | acc_sum={correct_sum/(i+1):.3f} | acc_avg={correct_avg/(i+1):.3f}")
 
+    df = pd.DataFrame(rows)
+    OUT_CSV = checkpoint_def + '_reddit_eval.csv'
+    df.to_csv(OUT_CSV, index=False)
+    print(f"Saved {len(df)} rows to {OUT_CSV}")
+    print("Columns:", list(df.columns))
     print("Final:")
     print("Raw accuracy:", correct_sum / len(data))
     print("Length-normalized accuracy:", correct_avg / len(data))
