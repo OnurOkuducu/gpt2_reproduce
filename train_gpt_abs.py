@@ -508,6 +508,7 @@ class Hyperparameters:
     # data
     train_bin = 'data/fineweb10B/fineweb_train_*.bin' # input .bin to train on
     val_bin = 'data/fineweb10B/fineweb_val_*.bin' # input .bin to eval validation loss on
+    reddit_train_bin = 'data/fineweb10B/fineweb_train_*.bin' # input .bin to train on
     # optimization
     batch_size = 32*1024 # batch size in tokens
     max_device_batch_size = 32*1024 # batch size per device in tokens
@@ -560,6 +561,8 @@ print0('='*100)
 
 # load data
 train_loader = DistributedDataLoader(args.train_bin)
+reddit_train_loader = DistributedDataLoader(args.reddit_train_bin)
+
 val_loader = DistributedDataLoader(args.val_bin)
 print0(f'Training dataloader files: {train_loader.files}')
 print0(f'Validation dataloader files: {val_loader.files}')
@@ -686,11 +689,21 @@ for step in range(train_steps + 1):
 
     if last_step or (step+1) % args.save_every == 0:
         if master_process and args.save_checkpoint:
-            log = dict(step=step, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
+            #log = dict(step=step, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
+            log = dict(
+                    step=step,
+                    code=code,
+                    model=model.state_dict(),
+                    optimizers=[opt.state_dict() for opt in optimizers],
+                    schedulers=[sch.state_dict() for sch in schedulers],
+                    rng_state=torch.get_rng_state(),
+                    cuda_rng_state=torch.cuda.get_rng_state_all(),
+                )
             os.makedirs(f'logs/{run_id}', exist_ok=True)
             torch.save(log, f'logs/{run_id}/state_step{step:06d}.pt')
         # the last step only has the validation loop, so break to avoid training
-        break
+        if last_step:
+            break
 
     # --------------- TRAINING SECTION -----------------
     model.train()
