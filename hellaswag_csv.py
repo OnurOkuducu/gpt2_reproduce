@@ -9,14 +9,14 @@ from updated_abs_v2 import GPT
 
 # ========= Config =========
 device = "cuda"
-vocab_size = 50259   # 50257 + <ins> + <ctx>
-num_layers = 12
-num_heads  = 6
-model_dim  = 768
-max_seq_len = 48 * 1024
+vocab_size = 50304
+num_layers = 12 
+num_heads = 6
+model_dim = 768
+max_seq_len = 1024
 
 CHECKPOINT = "/workspace/modded-nanogpt/logs/3c34de42-5da2-46fd-89f6-a130112b5906/state_step003999.pt"
-N_EVAL     = 400      # set to len(ds) for full eval
+N_EVAL     = 400    
 BLOCK_SIZE = 128
 PAD_TOKEN  = 50256
 OUT_CSV    = "hellaswag_abstain_stats.csv"
@@ -63,19 +63,19 @@ def score_continuation_abstain(model, prompt: str, continuation: str):
         pad = torch.full((pad_len,), PAD_TOKEN, dtype=input_ids.dtype, device=device)
         input_ids = torch.cat([pad, input_ids])
 
-    # Number of KV blocks for your FlexAttention
+
     sw_blocks = torch.tensor(max(1, len(input_ids) // BLOCK_SIZE), dtype=torch.int32, device=device)
 
     # Model.inference must return (logits [1,T,V] or [T,V], gates [T])
-    logits, gates = model.inference(input_ids, sw_blocks, use_capped_logits=True, return_hidden=False)
+    logits, gates = model.inference(input_ids, sw_blocks)
 
     if logits.ndim == 3: logits = logits[0]  # [T,V]
     # gates expected shape [T]
     assert gates.ndim == 1, f"Expected gates [T], got {gates.shape}"
 
     # Next-token logprobs
-    VOCAB_SIZE = getattr(model.lm_head, "out_features", 50257)
-    logits   = logits[:-1, :VOCAB_SIZE]          # [T-1,V]
+    VOCAB_SIZE = getattr(model.lm_head, "out_features", vocab_size)
+    logits   = logits[:-1, :vocab_size]          # [T-1,V]
     logprobs = torch.log_softmax(logits, dim=-1) # [T-1,V]
     target   = input_ids[1:]                     # [T-1]
     gates_t  = gates[:-1]                        # [T-1]
