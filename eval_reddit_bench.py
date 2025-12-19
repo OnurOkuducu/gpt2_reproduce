@@ -17,7 +17,7 @@ PAD_TOKEN  = 50256  # <|endoftext|> as pad
 
 REDDIT_SUBS = [
     "programming", "science", "bestof", "Games",
-    "Fitness", "DIY", "personalfinance", "philosophy", "history",
+    "Fitness", "DIY", "personalfinance", "philosophy", "history",'fashion','boardgames'
 ]
 
 def build_encoder(with_ins_ctx: bool):
