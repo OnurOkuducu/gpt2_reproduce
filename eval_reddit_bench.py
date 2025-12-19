@@ -60,6 +60,8 @@ def score_continuation_like_hellaswag(model, enc, prompt: str, continuation: str
         pad = torch.full((pad_len,), PAD_TOKEN, dtype=input_ids.dtype, device=device)
         input_ids = torch.cat([pad, input_ids])
 
+    sw_blocks = torch.tensor(max(1, len(input_ids) // BLOCK_SIZE), dtype=torch.int32, device=device)
+
     # Model.inference must return (logits [1,T,V] or [T,V], gates [T])
     logits, gates = model.inference(input_ids, sw_blocks)
 
