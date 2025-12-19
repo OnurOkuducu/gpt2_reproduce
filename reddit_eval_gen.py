@@ -4,7 +4,7 @@ import random
 
 REDDIT_SUBS = [
     "programming", "science", "bestof", "Games",
-    "Fitness", "DIY", "personalfinance", "philosophy", "history",
+    "Fitness", "DIY", "personalfinance", "philosophy", "history", "fashion", "boardgames"
 ]
 
 INSTR = "Guess the subreddit of the following post. Say IDK if you are not sure."
@@ -208,6 +208,51 @@ POSTS_20 = {
         "How did trade influence the rise of city-states in Italy?",
         "How did revolutions in 1848 influence later European politics?",
     ],
+    "fashion" : [
+    "How do fashion trends cycle back every few decades?",
+    "What distinguishes timeless style from trend-following?",
+    "Why do luxury brands maintain high prices even with mass appeal?",
+    "How much does fit matter compared to fabric quality?",
+    "What are common mistakes people make when building a wardrobe?",
+    "Why do some fashion trends face strong backlash?",
+    "How has social media changed personal fashion expression?",
+    "What role does sustainability realistically play in modern fashion?",
+    "Why do certain colors dominate fashion in specific seasons?",
+    "How do cultural influences shape global fashion trends?",
+    "What makes an outfit look intentional rather than random?",
+    "Why is minimalism so persistent in fashion cycles?",
+    "How do designers balance creativity with wearability?",
+    "Why do runway styles often differ from everyday fashion?",
+    "How much does brand perception influence clothing choices?",
+    "What are signs of poor garment construction?",
+    "Why do some styles look good on others but not on everyone?",
+    "How has fast fashion affected long-term style habits?",
+    "What factors influence whether a trend becomes mainstream?",
+    "Why is accessorizing often overlooked in outfit planning?",
+    ],
+    "boardgames" : [
+    "What makes a board game strategically deep without becoming overly complex?",
+    "Why do some Eurogames feel dry despite elegant mechanics?",
+    "How important is theme integration compared to pure mechanics?",
+    "What are good gateway games for players who dislike luck-based systems?",
+    "Why do cooperative board games often suffer from the quarterbacking problem?",
+    "What distinguishes a timeless board game from a passing trend?",
+    "Are legacy games fundamentally changing the board game landscape?",
+    "How do designers balance player interaction with downtime?",
+    "Why do some games work better digitally than on the table?",
+    "Is randomness essential for replayability in board games?",
+    "What causes certain games to have runaway leader problems?",
+    "How much should balance matter compared to asymmetry?",
+    "Why do abstract strategy games remain popular despite minimal theme?",
+    "What makes teaching a board game difficult even if rules are simple?",
+    "How do expansions usually affect game balance long-term?",
+    "Why are some highly rated games rarely played after purchase?",
+    "What design mistakes commonly ruin otherwise promising board games?",
+    "How important is player count scalability in modern game design?",
+    "Why do some board games generate analysis paralysis?",
+    "What makes a board game satisfying to lose?",
+]
+
 }
 
 def main(out_path="reddit_subreddit_benchmark.json", n_per_sub=20, seed=0):
