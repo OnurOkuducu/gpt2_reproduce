@@ -59,22 +59,49 @@ def score_continuation_like_hellaswag(model, enc, prompt: str, continuation: str
         pad = torch.full((pad_len,), PAD_TOKEN, dtype=input_ids.dtype, device=device)
         input_ids = torch.cat([pad, input_ids])
 
-    logits, = model.inference(input_ids, sliding_window_num_blocks)
-    logits = logits[:-1, :vocab_size]                                   # [T-1, V]
-    logprobs = torch.log_softmax(logits, dim=-1)
-    target = input_ids[1:]                                              # [T-1]
+    # Model.inference must return (logits [1,T,V] or [T,V], gates [T])
+    logits, gates = model.inference(input_ids, sw_blocks)
 
-    # continuation starts right after prompt (in unpadded sequence)
+    if logits.ndim == 3: logits = logits[0]  # [T,V]
+    # gates expected shape [T]
+    assert gates.ndim == 1, f"Expected gates [T], got {gates.shape}"
+
+    # Next-token logprobs
+    VOCAB_SIZE = getattr(model.lm_head, "out_features", vocab_size)
+    logits   = logits[:-1, :vocab_size]          # [T-1,V]
+    logprobs = torch.log_softmax(logits, dim=-1) # [T-1,V]
+    target   = input_ids[1:]                     # [T-1]
+    gates_t  = gates[:-1]                        # [T-1]
+
+    # Continuation slice starts at the boundary between prompt and continuation
     cont_start = len(prompt_ids)
     cont_start_idx = pad_len + cont_start
 
-    lp_slice  = logprobs[cont_start_idx - 1 :, :]
-    tgt_slice = target  [cont_start_idx - 1 :]
+    lp_slice  = logprobs[cont_start_idx - 1 :, :]            # [C,V]
+    tgt_slice = target  [cont_start_idx - 1 :]               # [C]
+    g_slice   = gates_t [cont_start_idx - 1 :]               # [C]
 
-    token_lps = lp_slice.gather(1, tgt_slice.unsqueeze(-1)).squeeze(-1)
+    # Gather true-token logprobs
+    token_lps = lp_slice.gather(1, tgt_slice.unsqueeze(-1)).squeeze(-1)  # [C]
+
     sum_lp = token_lps.sum().item()
     avg_lp = sum_lp / max(1, tgt_slice.numel())
-    return sum_lp, avg_lp
+
+    # Gated score (no lambda)
+    sum_lp_gated = (g_slice * token_lps).sum().item()
+    avg_lp_gated = sum_lp_gated / max(1, tgt_slice.numel())
+
+    mean_gate = g_slice.mean().item() if g_slice.numel() else 1.0
+    min_gate  = g_slice.min().item()  if g_slice.numel() else 1.0
+
+    return {
+        "sum_lp": sum_lp,
+        "avg_lp": avg_lp,
+        "sum_lp_gated": sum_lp_gated,
+        "avg_lp_gated": avg_lp_gated,
+        "mean_g": mean_gate,
+        "min_g": min_gate,
+    }
 
 def main():
     import argparse
