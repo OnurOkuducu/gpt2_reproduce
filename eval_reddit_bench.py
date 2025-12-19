@@ -59,7 +59,7 @@ def score_continuation_like_hellaswag(model, enc, prompt: str, continuation: str
         pad = torch.full((pad_len,), PAD_TOKEN, dtype=input_ids.dtype, device=device)
         input_ids = torch.cat([pad, input_ids])
 
-    logits = model.inference(input_ids, sliding_window_num_blocks)[0]   # [T, V]
+    logits, = model.inference(input_ids, sliding_window_num_blocks)
     logits = logits[:-1, :vocab_size]                                   # [T-1, V]
     logprobs = torch.log_softmax(logits, dim=-1)
     target = input_ids[1:]                                              # [T-1]
